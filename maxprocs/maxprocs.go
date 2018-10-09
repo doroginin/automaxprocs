@@ -21,7 +21,7 @@
 // Package maxprocs lets Go programs easily configure runtime.GOMAXPROCS to
 // match the configured Linux CPU quota. Unlike the top-level automaxprocs
 // package, it lets the caller configure logging and handle errors.
-package maxprocs // import "go.uber.org/automaxprocs/maxprocs"
+package maxprocs
 
 import (
 	"os"
@@ -40,6 +40,7 @@ type config struct {
 	printf        func(string, ...interface{})
 	procs         func(int) (int, iruntime.CPUQuotaStatus, error)
 	minGOMAXPROCS int
+	ignoreEnv     bool
 }
 
 func (c *config) log(fmt string, args ...interface{}) {
@@ -71,6 +72,13 @@ func Min(n int) Option {
 	})
 }
 
+// IgnoreEnv ignores GOMAXPROCS from environments
+func IgnoreEnv() Option {
+	return optionFunc(func(cfg *config) {
+		cfg.ignoreEnv = true
+	})
+}
+
 type optionFunc func(*config)
 
 func (of optionFunc) apply(cfg *config) { of(cfg) }
@@ -93,12 +101,14 @@ func Set(opts ...Option) (func(), error) {
 		cfg.log("maxprocs: No GOMAXPROCS change to reset")
 	}
 
-	// Honor the GOMAXPROCS environment variable if present. Otherwise, amend
-	// `runtime.GOMAXPROCS()` with the current process' CPU quota if the OS is
-	// Linux, and guarantee a minimum value of 2 to ensure efficiency.
-	if max, exists := os.LookupEnv(_maxProcsKey); exists {
-		cfg.log("maxprocs: Honoring GOMAXPROCS=%d as set in environment", max)
-		return undoNoop, nil
+	if !cfg.ignoreEnv {
+		// Honor the GOMAXPROCS environment variable if present. Otherwise, amend
+		// `runtime.GOMAXPROCS()` with the current process' CPU quota if the OS is
+		// Linux, and guarantee a minimum value of 2 to ensure efficiency.
+		if max, exists := os.LookupEnv(_maxProcsKey); exists {
+			cfg.log("maxprocs: Honoring GOMAXPROCS=%d as set in environment", max)
+			return undoNoop, nil
+		}
 	}
 
 	maxProcs, status, err := cfg.procs(cfg.minGOMAXPROCS)
